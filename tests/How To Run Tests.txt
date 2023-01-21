@@ -1,0 +1,5 @@
+Do the following inside your VM (assuming you've unzipped this already):
+1. Place your submitted C files in this folder
+2. Run "run_tests.sh"
+
+You can see the grading in your feedbacks

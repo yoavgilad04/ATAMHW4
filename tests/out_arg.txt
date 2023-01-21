@@ -1,0 +1,4 @@
+program_arg.out: RUNNNN
+PRF:: run #1 returned with 7
+PRF:: run #2 returned with 0
+PRF:: run #3 returned with 84
