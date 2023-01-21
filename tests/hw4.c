@@ -265,12 +265,10 @@ void run_breakpoint_debugger(pid_t child_pid, unsigned long sym_addr)
 //                wait(&wait_status);
 //            }
 //        }
-        if(regs.rip != return_data+1)
-        {
-            counter++;
-            regs.rip-=1;
-            printf("PRF:: run #%d returned with %d\n", counter, (int)regs.rax);
-        }
+
+        counter++;
+        regs.rip-=1;
+        printf("PRF:: run #%d returned with %d\n", counter, (int)regs.rax);
 
         ptrace(PTRACE_POKETEXT, child_pid, (void*)return_address, (void*)return_data);
         ptrace(PTRACE_SETREGS, child_pid, NULL, &regs);
