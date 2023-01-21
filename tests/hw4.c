@@ -265,7 +265,8 @@ void run_breakpoint_debugger(pid_t child_pid, unsigned long sym_addr)
 //                wait(&wait_status);
 //            }
 //        }
-        if(regs.rip == return_address && regs.rsp == rsp)
+        ptrace()
+        if(regs.rip != return_address+1)
         {
             counter++;
             regs.rip-=1;
