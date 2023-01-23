@@ -253,19 +253,19 @@ void run_breakpoint_debugger(pid_t child_pid, unsigned long sym_addr)
         //wait for the function to return
         wait(&wait_status);
 
-        ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
-        while(regs.rip != return_address+1 || regs.rsp != (rsp+8)) {
-            if (regs.rip == return_address + 1 && regs.rsp != rsp + 8) {
-                regs.rip -= 1;
-                ptrace(PTRACE_POKETEXT, child_pid, (void *) return_address, (void *) return_data);
-                ptrace(PTRACE_SETREGS, child_pid, NULL, &regs);
-                ptrace(PTRACE_POKETEXT, child_pid, (void*)return_address, (void*)return_data_trap);
-                ptrace(PTRACE_CONT, child_pid, NULL, NULL);
-                wait(&wait_status);
-                ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
-                continue;
-            }
-        }
+//        ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
+//        while(regs.rip != return_address+1 || regs.rsp != (rsp+8)) {
+//            if (regs.rip == return_address + 1 && regs.rsp != rsp + 8) {
+//                regs.rip -= 1;
+//                ptrace(PTRACE_POKETEXT, child_pid, (void *) return_address, (void *) return_data);
+//                ptrace(PTRACE_SETREGS, child_pid, NULL, &regs);
+//                ptrace(PTRACE_POKETEXT, child_pid, (void*)return_address, (void*)return_data_trap);
+//                ptrace(PTRACE_CONT, child_pid, NULL, NULL);
+//                wait(&wait_status);
+//                ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
+//                continue;
+//            }
+//        }
 
         counter++;
         regs.rip-=1;
