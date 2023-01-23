@@ -351,8 +351,16 @@ void run_breakpoint_debugger(pid_t child_pid, unsigned long sym_addr, bool is_dy
                 regs.rip -= 1;
                 ptrace(PTRACE_POKETEXT, child_pid, (void *) return_address, (void *) return_data);
                 ptrace(PTRACE_SETREGS, child_pid, NULL, &regs);
+                ptrace(PTRACE_POKETEXT, child_pid, (void *) addr, (void *) data_trap);
+                ptrace(PTRACE_CONT, child_pid, NULL, NULL);
+
+                wait_status(&wait_status);
+                ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
+                regs.rip -= 1;
+                ptrace(PTRACE_POKETEXT, child_pid, (void *) addr, (void *) data);
                 ptrace(PTRACE_POKETEXT, child_pid, (void*)return_address, (void*)return_data_trap);
                 ptrace(PTRACE_CONT, child_pid, NULL, NULL);
+
                 wait(&wait_status);
                 ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
                 continue;
