@@ -23,10 +23,6 @@
 
 #define SHT_SYMTAB 2
 #define SHT_STRTAB 3
-#define SHT_RELA 4
-#define SHT_DYNSYM 11
-
-
 /* symbol_name		- The symbol (maybe function) we need to search for.
  * exe_file_name	- The file where we search the symbol in.
  * error_val		- If  1: A global symbol was found, and defined in the given executable.
@@ -191,87 +187,6 @@ unsigned long find_symbol(char* symbol_name, char* exe_file_name, int* error_val
     return 0;
 }
 
-unsigned long find_dynamic_symbol(char* symbol_name, char* exe_file_name) {
-    FILE* file = fopen(exe_file_name, "rb");
-    if(!file) exit(1);
-    Elf64_Ehdr ehdr;
-    fread(&ehdr, sizeof(ehdr), 1, file);
-
-
-    Elf64_Shdr shdr;
-    fseek(file, ehdr.e_shoff + ehdr.e_shentsize * ehdr.e_shstrndx, SEEK_SET);
-    fread(&shdr, ehdr.e_shentsize, 1, file);
-
-    //find string table
-    char * stringTable = (char *) malloc(shdr.sh_size);
-    fseek(file, shdr.sh_offset, SEEK_SET);
-    fread(stringTable, shdr.sh_size, 1, file);
-
-    Elf64_Shdr dynstr;
-    Elf64_Sym dynsym;
-    Elf64_Rela * rela_table = NULL;
-    Elf64_Sym* dyn_symbols = NULL;
-
-
-    int index = -1;
-    int num_of_rela = 0;
-    int num_of_symbols = 0;
-    char * dynNames = NULL;
-
-    for(int i=0; i<ehdr.e_shnum; i++){
-        fseek(file, ehdr.e_shoff + i * sizeof(shdr), SEEK_SET);
-        fread(&shdr, sizeof(shdr), 1, file);
-        char * curr_section_name = (char *) (stringTable+ shdr.sh_name);
-        //printf("rela: %s", curr_section_name);
-
-        //found rela.plt
-        if (!strcmp(curr_section_name, ".rela.plt")){
-            rela_table = malloc(shdr.sh_size);
-            fseek(file, shdr.sh_offset, SEEK_SET);
-            fread(rela_table, shdr.sh_size , 1, file);
-            num_of_rela = shdr.sh_size / shdr.sh_entsize;
-
-        }
-
-        //found dynsym
-        else if (!strcmp(curr_section_name, ".dynsym")){
-
-            dyn_symbols = (Elf64_Sym*) malloc (shdr.sh_size);
-            fseek(file, shdr.sh_offset, SEEK_SET);
-            fread(dyn_symbols, shdr.sh_size, 1, file);
-            num_of_symbols = shdr.sh_size / shdr.sh_entsize;
-        }
-        
-        //found dynstr
-        else if (!strcmp(curr_section_name, ".dynstr")){
-
-            dynNames = (char *)malloc (shdr.sh_size);
-            fseek(file, shdr.sh_offset, SEEK_SET);
-            fread(dynNames, shdr.sh_size, 1, file);
-
-        }
-
-    }
-    //search for funcName
-    for(int i=0; i<num_of_rela; i++){
-        Elf64_Rela curr_rela = rela_table[i];
-        char * curr = dynNames + dyn_symbols[ELF64_R_SYM(curr_rela.r_info)].st_name;
-        if (!strcmp(curr, symbol_name)){
-            //printf("found!\n");
-            index=i;
-        }
-    }
-
-    unsigned long addr = index >-1 ? rela_table[index].r_offset : 0;
-    free(rela_table);
-    free(dyn_symbols);
-    free(dynNames);
-    free(stringTable);
-    return addr;
-}
-
-
-
 pid_t run_target(const char* programname) {
     pid_t pid;
 
@@ -296,7 +211,7 @@ pid_t run_target(const char* programname) {
     }
 }
 
-void run_breakpoint_debugger(pid_t child_pid, unsigned long sym_addr, bool is_dyn)
+void run_breakpoint_debugger(pid_t child_pid, unsigned long sym_addr)
 {
     int wait_status;
     int counter = 0;
@@ -304,13 +219,6 @@ void run_breakpoint_debugger(pid_t child_pid, unsigned long sym_addr, bool is_dy
     unsigned long addr = sym_addr;
     /* Wait for child to stop on its first instruction */
     wait(&wait_status);
-    unsigned long old_addr = sym_addr;
-
-    if(is_dyn)
-    {
-        addr = ptrace(PTRACE_PEEKTEXT, child_pid, (void*)addr, NULL);
-        addr -= 6;
-    }
 
     // Insert the entries instruction of the function to data
     unsigned long data = ptrace(PTRACE_PEEKTEXT, child_pid, (void*)addr, NULL);
@@ -346,17 +254,19 @@ void run_breakpoint_debugger(pid_t child_pid, unsigned long sym_addr, bool is_dy
         wait(&wait_status);
 
         ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
-/*        while(regs.rip != return_address+1 || regs.rsp != (rsp+8)) {
+        while(regs.rip != return_address+1 || regs.rsp != (rsp+8)) {
             if (regs.rip == return_address + 1 && regs.rsp != rsp + 8) {
                 regs.rip -= 1;
                 ptrace(PTRACE_POKETEXT, child_pid, (void *) return_address, (void *) return_data);
                 ptrace(PTRACE_SETREGS, child_pid, NULL, &regs);
-                ptrace(PTRACE_POKETEXT, child_pid, (void *) addr, (void *) data_trap);
-                *//* Let the child run to the breakpoint and wait for it to reach it *//*
+                ptrace(PTRACE_POKETEXT, child_pid, (void*)return_address, (void*)return_data_trap);
                 ptrace(PTRACE_CONT, child_pid, NULL, NULL);
                 wait(&wait_status);
+                ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
+                continue;
             }
-        }*/
+        }
+
         counter++;
         regs.rip-=1;
         printf("PRF:: run #%d returned with %d\n", counter, (int)regs.rax);
@@ -376,36 +286,24 @@ void run_breakpoint_debugger(pid_t child_pid, unsigned long sym_addr, bool is_dy
 int main(int argc, char *const argv[]) {
     int err = 0;
     unsigned long addr = find_symbol(argv[1], argv[2], &err);
-    bool is_dyn = false;
 
-    if (err > 0) is_dyn = false;
+    if (err > 0) {
+        //printf("%s will be loaded to 0x%lx\n", argv[1], addr);
+        pid_t child_pid;
 
-    else if (err == -2){
+        child_pid = run_target(argv[2]);
+
+        // run specific "debugger"
+        run_breakpoint_debugger(child_pid, addr);
+    }
+    else if (err == -2)
         printf("PRF:: %s is not a global symbol! :(\n", argv[1]);
-        return 0;
-    }
-    else if (err == -1){
+    else if (err == -1)
         printf("PRF:: %s not found!\n", argv[1]);
-        return 0;
-    }
-    else if (err == -3){
+    else if (err == -3)
         printf("PRF:: %s not an executable! :(\n", argv[2]);
-        return 0;
-    }
-    else if (err == -4){
-        //printf("%s is a global symbol, but will come from a shared library\n", argv[1]);
-        addr = find_dynamic_symbol(argv[1], argv[2]);
-        is_dyn = true;
-    }
-
-
-    //printf("%s will be loaded to 0x%lx\n", argv[1], addr);
-    pid_t child_pid;
-
-    child_pid = run_target(argv[2]);
-
-    // run specific "debugger"
-    run_breakpoint_debugger(child_pid, addr, is_dyn);
+    else if (err == -4)
+        printf("%s is a global symbol, but will come from a shared library\n", argv[1]);
 
     return 0;
 }
