@@ -207,8 +207,7 @@ unsigned long find_dynamic_symbol(char* symbol_name, char* exe_file_name) {
     fseek(file, shdr.sh_offset, SEEK_SET);
     fread(stringTable, shdr.sh_size, 1, file);
 
-    Elf64_Shdr dynstr;
-    Elf64_Sym dynsym;
+
     Elf64_Rela * rela_table = NULL;
     Elf64_Sym* dyn_symbols = NULL;
 
@@ -241,7 +240,7 @@ unsigned long find_dynamic_symbol(char* symbol_name, char* exe_file_name) {
             fread(dyn_symbols, shdr.sh_size, 1, file);
             num_of_symbols = shdr.sh_size / shdr.sh_entsize;
         }
-
+        
         //found dynstr
         else if (!strcmp(curr_section_name, ".dynstr")){
 
@@ -302,9 +301,10 @@ void run_breakpoint_debugger(pid_t child_pid, unsigned long sym_addr, bool is_dy
     int counter = 0;
     struct user_regs_struct regs;
     unsigned long addr = sym_addr;
+    unsigned long old_addr = sym_addr;
+
     /* Wait for child to stop on its first instruction */
     wait(&wait_status);
-    unsigned long old_addr = sym_addr;
 
     if(is_dyn)
     {
@@ -336,6 +336,7 @@ void run_breakpoint_debugger(pid_t child_pid, unsigned long sym_addr, bool is_dy
         unsigned long return_data_trap = (return_data & 0xFFFFFFFFFFFFFF00) | 0xCC;
         ptrace(PTRACE_POKETEXT, child_pid, (void*)return_address, (void*)return_data_trap);
         // Restore the enter of the function instruction
+
         ptrace(PTRACE_POKETEXT, child_pid, (void*)addr, (void*)data);
         regs.rip-=1;
         ptrace(PTRACE_SETREGS, child_pid, NULL, &regs);
@@ -346,26 +347,26 @@ void run_breakpoint_debugger(pid_t child_pid, unsigned long sym_addr, bool is_dy
         wait(&wait_status);
 
         ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
-        while(regs.rip != return_address+1 || regs.rsp != (rsp+8)) {
-            if (regs.rip == return_address + 1 && regs.rsp != rsp + 8) {
-                regs.rip -= 1;
-                ptrace(PTRACE_POKETEXT, child_pid, (void *) return_address, (void *) return_data);
-                ptrace(PTRACE_SETREGS, child_pid, NULL, &regs);
-                ptrace(PTRACE_POKETEXT, child_pid, (void *) addr, (void *) data_trap);
-                ptrace(PTRACE_CONT, child_pid, NULL, NULL);
 
-                wait(&wait_status);
-                ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
-                regs.rip -= 1;
-                ptrace(PTRACE_POKETEXT, child_pid, (void *) addr, (void *) data);
-                ptrace(PTRACE_POKETEXT, child_pid, (void*)return_address, (void*)return_data_trap);
-                ptrace(PTRACE_CONT, child_pid, NULL, NULL);
+        //if this is recursive call, and do not return to the original call
+       while(regs.rsp != rsp + 8) {
+           //if this is recursive call, and return from the original call. we need to remove the breakpoint
 
-                wait(&wait_status);
-                ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
-                continue;
-            }
-        }
+           ptrace(PTRACE_POKETEXT, child_pid, (void*)return_address, (void*)return_data);
+           regs.rip -= 1;
+           ptrace(PTRACE_SETREGS, child_pid, NULL, &regs);
+           ptrace(PTRACE_SINGLESTEP,child_pid,NULL,NULL);
+           wait(&wait_status);
+
+           ptrace(PTRACE_POKETEXT, child_pid, (void*)return_address, (void*)return_data_trap);
+
+           /* Let the child run to the breakpoint and wait for it to reach it */
+           ptrace(PTRACE_CONT, child_pid, NULL, NULL);
+           wait(&wait_status);
+           ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
+
+       }
+
         counter++;
         regs.rip-=1;
         printf("PRF:: run #%d returned with %d\n", counter, (int)regs.rax);
@@ -373,13 +374,18 @@ void run_breakpoint_debugger(pid_t child_pid, unsigned long sym_addr, bool is_dy
         ptrace(PTRACE_POKETEXT, child_pid, (void*)return_address, (void*)return_data);
         ptrace(PTRACE_SETREGS, child_pid, NULL, &regs);
 
+        if(is_dyn && counter==1){
+            addr = ptrace(PTRACE_PEEKTEXT, child_pid, (void*)old_addr, NULL);
+            data = ptrace(PTRACE_PEEKTEXT, child_pid, (void*)addr, NULL);
+            data_trap = (data & 0xFFFFFFFFFFFFFF00) | 0xCC;
+        }
+
         ptrace(PTRACE_POKETEXT, child_pid, (void*)addr, (void*)data_trap);
         /* Let the child run to the breakpoint and wait for it to reach it */
         ptrace(PTRACE_CONT, child_pid, NULL, NULL);
         wait(&wait_status);
     }
-    ptrace(PTRACE_POKETEXT, child_pid, (void*)addr, (void*)data);
-    return;
+
 }
 
 int main(int argc, char *const argv[]) {
@@ -406,7 +412,6 @@ int main(int argc, char *const argv[]) {
         addr = find_dynamic_symbol(argv[1], argv[2]);
         is_dyn = true;
     }
-
 
     //printf("%s will be loaded to 0x%lx\n", argv[1], addr);
     pid_t child_pid;
