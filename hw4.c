@@ -271,7 +271,7 @@ unsigned long find_dynamic_symbol(char* symbol_name, char* exe_file_name) {
 
 
 
-pid_t run_target(const char* programname) {
+pid_t run_target(const char* programname, char * const argv[]) {
     pid_t pid;
 
     pid = fork();
@@ -286,7 +286,7 @@ pid_t run_target(const char* programname) {
             exit(1);
         }
         /* Replace this process's image with the given program */
-        execl(programname, programname, NULL);
+        execv(programname, argv+2);
 
     } else {
         // fork error
@@ -346,6 +346,9 @@ void run_breakpoint_debugger(pid_t child_pid, unsigned long sym_addr, bool is_dy
         //wait for the function to return
         wait(&wait_status);
 
+        if(!WIFSTOPPED(wait_status)){
+            exit(1);
+        }
         ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
 
         //if this is recursive call, and do not return to the original call
@@ -358,11 +361,18 @@ void run_breakpoint_debugger(pid_t child_pid, unsigned long sym_addr, bool is_dy
            ptrace(PTRACE_SINGLESTEP,child_pid,NULL,NULL);
            wait(&wait_status);
 
+           if(!WIFSTOPPED(wait_status)){
+               exit(1);
+           }
+
            ptrace(PTRACE_POKETEXT, child_pid, (void*)return_address, (void*)return_data_trap);
 
            /* Let the child run to the breakpoint and wait for it to reach it */
            ptrace(PTRACE_CONT, child_pid, NULL, NULL);
            wait(&wait_status);
+           if(!WIFSTOPPED(wait_status)){
+               exit(1);
+           }
            ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
 
        }
@@ -416,7 +426,7 @@ int main(int argc, char *const argv[]) {
     //printf("%s will be loaded to 0x%lx\n", argv[1], addr);
     pid_t child_pid;
 
-    child_pid = run_target(argv[2]);
+    child_pid = run_target(argv[2], argv);
 
     // run specific "debugger"
     run_breakpoint_debugger(child_pid, addr, is_dyn);
